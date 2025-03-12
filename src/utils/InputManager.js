@@ -53,6 +53,7 @@ export class InputManager {
         break;
       case 'Space':
         this.keys.jump = true;
+        console.log('Space pressed - jump true');
         break;
     }
   }
@@ -73,6 +74,7 @@ export class InputManager {
         break;
       case 'Space':
         this.keys.jump = false;
+        console.log('Space released - jump false');
         break;
     }
   }
