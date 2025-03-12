@@ -7,7 +7,6 @@ import { InputManager } from './utils/InputManager.js';
 
 // Global variables
 let world, scene, renderer, camera, character, thirdPersonCamera, inputManager;
-let lastTime = 0;
 const physicsClock = new THREE.Clock();
 
 // Initialize the game
@@ -17,6 +16,7 @@ async function init() {
   
   // Wait for RAPIER to initialize
   await RAPIER.init();
+  console.log("Rapier initialized successfully");
   
   // Create the renderer
   renderer = new THREE.WebGLRenderer({
@@ -28,10 +28,12 @@ async function init() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   
-  // Create physics world
-  world = new RAPIER.World({ x: 0.0, y: -9.81, z: 0.0 });
+  // Create physics world with standard Earth gravity
+  const gravity = new RAPIER.Vector3(0.0, -9.81 * 3, 0.0); // Stronger gravity for gameplay
+  world = new RAPIER.World(gravity);
+  console.log("Physics world created with gravity:", gravity.y);
   
-  // Create scene and camera
+  // Create scene with ground
   const { sceneObj, ground } = createScene(world);
   scene = sceneObj;
   
@@ -45,10 +47,9 @@ async function init() {
   
   // Create character controller
   character = new CharacterController(world, scene, {
-    position: new THREE.Vector3(0, 3, 0),
+    position: new THREE.Vector3(0, 5.0, 0), // Start higher for better visual of jumping
     radius: 0.5,
-    height: 1.75,
-    jumpForce: 10
+    height: 2.0
   });
   
   // Create third-person camera
@@ -68,6 +69,7 @@ async function init() {
   loadingScreen.classList.add('hidden');
   
   // Start the game loop
+  physicsClock.start();
   requestAnimationFrame(gameLoop);
 }
 
@@ -79,29 +81,37 @@ function onWindowResize() {
 }
 
 // Main game loop
-function gameLoop(currentTime) {
+function gameLoop() {
   requestAnimationFrame(gameLoop);
   
   const deltaTime = physicsClock.getDelta();
   
   // Step the physics world
-  world.step();
+  if (world) {
+    world.step();
+  }
   
   // Update character controller based on inputs
-  character.update({
-    forward: inputManager.keys.forward,
-    backward: inputManager.keys.backward,
-    left: inputManager.keys.left,
-    right: inputManager.keys.right,
-    jump: inputManager.keys.jump
-  }, deltaTime);
+  if (character) {
+    character.update({
+      forward: inputManager.keys.forward,
+      backward: inputManager.keys.backward,
+      left: inputManager.keys.left,
+      right: inputManager.keys.right,
+      jump: inputManager.keys.jump
+    }, deltaTime, camera);
+  }
   
   // Update camera position
-  thirdPersonCamera.update(deltaTime, inputManager.mouseDelta);
-  inputManager.resetMouseDelta();
+  if (thirdPersonCamera) {
+    thirdPersonCamera.update(deltaTime, inputManager.mouseDelta);
+    inputManager.resetMouseDelta();
+  }
   
   // Render the scene
-  renderer.render(scene, camera);
+  if (scene && camera) {
+    renderer.render(scene, camera);
+  }
 }
 
 // Initialize the game when the page loads
