@@ -1,154 +1,76 @@
 import * as THREE from 'three';
 import * as RAPIER from '@dimforge/rapier3d-compat';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import { CharacterController } from './components/CharacterController';
+import { CharacterController } from './components/CharacterController.js';
+import { createScene } from './components/Scene.js';
+import { ThirdPersonCamera } from './components/ThirdPersonCamera.js';
+import { InputManager } from './utils/InputManager.js';
 
-// Initialize Three.js
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-document.body.appendChild(renderer.domElement);
+// Global variables
+let world, scene, renderer, camera, character, thirdPersonCamera, inputManager;
+const physicsClock = new THREE.Clock();
 
-// Camera setup
-camera.position.set(0, 5, 10);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.05;
-controls.maxPolarAngle = Math.PI * 0.5;
-
-// Lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-scene.add(ambientLight);
-
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-directionalLight.position.set(5, 5, 5);
-directionalLight.castShadow = true;
-directionalLight.shadow.mapSize.width = 2048;
-directionalLight.shadow.mapSize.height = 2048;
-directionalLight.shadow.camera.near = 0.5;
-directionalLight.shadow.camera.far = 50;
-directionalLight.shadow.camera.left = -10;
-directionalLight.shadow.camera.right = 10;
-directionalLight.shadow.camera.top = 10;
-directionalLight.shadow.camera.bottom = -10;
-scene.add(directionalLight);
-
-// Ground
-const groundGeometry = new THREE.PlaneGeometry(20, 20);
-const groundMaterial = new THREE.MeshStandardMaterial({
-  color: 0x808080,
-  roughness: 0.8,
-  metalness: 0.2
-});
-const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
-
-// Initialize RAPIER physics
-let world;
-let character;
-let lastTime = 0;
-const inputs = {
-  forward: false,
-  backward: false,
-  left: false,
-  right: false,
-  jump: false
-};
-
-async function initPhysics() {
+// Initialize the game
+async function init() {
+  // Show loading screen until everything is ready
+  const loadingScreen = document.getElementById('loading-screen');
+  
+  // Wait for RAPIER to initialize
   await RAPIER.init();
+  console.log("Rapier initialized successfully");
   
-  world = new RAPIER.World({ x: 0.0, y: -9.81, z: 0.0 });
+  // Create the renderer
+  renderer = new THREE.WebGLRenderer({
+    canvas: document.getElementById('game'),
+    antialias: true
+  });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   
-  // Ground collider
-  const groundColliderDesc = RAPIER.ColliderDesc.cuboid(10.0, 0.1, 10.0)
-    .setTranslation(0.0, -0.1, 0.0)
-    .setFriction(0.7)
-    .setRestitution(0.3);
-  world.createCollider(groundColliderDesc);
+  // Create physics world with standard Earth gravity
+  const gravity = new RAPIER.Vector3(0.0, -9.81 * 3, 0.0); // Stronger gravity for gameplay
+  world = new RAPIER.World(gravity);
+  console.log("Physics world created with gravity:", gravity.y);
   
-  // Create character
+  // Create scene with ground
+  const { sceneObj, ground } = createScene(world);
+  scene = sceneObj;
+  
+  // Create perspective camera
+  camera = new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000
+  );
+  
+  // Create character controller
   character = new CharacterController(world, scene, {
-    position: new THREE.Vector3(0, 1.0, 0),
+    position: new THREE.Vector3(0, 5.0, 0), // Start higher for better visual of jumping
     radius: 0.5,
-    height: 2.0,
-    maxSpeed: 5.0,
-    jumpForce: 7.0
+    height: 2.0
   });
   
-  // Start animation loop
-  animate();
-}
-
-// Input handling
-function handleKeyDown(event) {
-  switch (event.code) {
-    case 'KeyW':
-      inputs.forward = true;
-      break;
-    case 'KeyS':
-      inputs.backward = true;
-      break;
-    case 'KeyA':
-      inputs.left = true;
-      break;
-    case 'KeyD':
-      inputs.right = true;
-      break;
-    case 'Space':
-      inputs.jump = true;
-      break;
-  }
-}
-
-function handleKeyUp(event) {
-  switch (event.code) {
-    case 'KeyW':
-      inputs.forward = false;
-      break;
-    case 'KeyS':
-      inputs.backward = false;
-      break;
-    case 'KeyA':
-      inputs.left = false;
-      break;
-    case 'KeyD':
-      inputs.right = false;
-      break;
-    case 'Space':
-      inputs.jump = false;
-      break;
-  }
-}
-
-window.addEventListener('keydown', handleKeyDown);
-window.addEventListener('keyup', handleKeyUp);
-
-// Animation loop
-function animate(currentTime = 0) {
-  requestAnimationFrame(animate);
+  // Create third-person camera
+  thirdPersonCamera = new ThirdPersonCamera(camera, character.mesh, {
+    distance: 5,
+    height: 2
+  });
   
-  const deltaTime = (currentTime - lastTime) / 1000;
-  lastTime = currentTime;
+  // Setup input manager
+  inputManager = new InputManager();
+  inputManager.initialize();
   
-  if (world && character) {
-    world.step();
-    character.update(inputs, deltaTime, camera);
-    
-    // Update camera to follow character
-    const characterPosition = character.mesh.position;
-    const cameraOffset = new THREE.Vector3(0, 3, 7);
-    camera.position.copy(characterPosition).add(cameraOffset);
-    controls.target.copy(characterPosition);
-    controls.update();
-  }
+  // Handle window resize
+  window.addEventListener('resize', onWindowResize);
   
-  renderer.render(scene, camera);
+  // Hide loading screen
+  loadingScreen.classList.add('hidden');
+  
+  // Start the game loop
+  physicsClock.start();
+  requestAnimationFrame(gameLoop);
 }
 
 // Handle window resize
@@ -158,7 +80,39 @@ function onWindowResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-window.addEventListener('resize', onWindowResize);
+// Main game loop
+function gameLoop() {
+  requestAnimationFrame(gameLoop);
+  
+  const deltaTime = physicsClock.getDelta();
+  
+  // Step the physics world
+  if (world) {
+    world.step();
+  }
+  
+  // Update character controller based on inputs
+  if (character) {
+    character.update({
+      forward: inputManager.keys.forward,
+      backward: inputManager.keys.backward,
+      left: inputManager.keys.left,
+      right: inputManager.keys.right,
+      jump: inputManager.keys.jump
+    }, deltaTime, camera);
+  }
+  
+  // Update camera position
+  if (thirdPersonCamera) {
+    thirdPersonCamera.update(deltaTime, inputManager.mouseDelta);
+    inputManager.resetMouseDelta();
+  }
+  
+  // Render the scene
+  if (scene && camera) {
+    renderer.render(scene, camera);
+  }
+}
 
-// Initialize the game
-initPhysics();
+// Initialize the game when the page loads
+window.addEventListener('load', init); 
